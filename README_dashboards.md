@@ -20,7 +20,7 @@ Upewnij się, że masz zainstalowane te komponenty, jeśli planujesz korzystać 
 
 Dashboard, który pokazuje pełne możliwości integracji Pstryk All-in-One. Jeśli potrzebujesz tylko kilku kart z dashboardu, to po jego dodaniu możesz go dowolnie edytować i wykorzystać tylko te karty które są Ci potrzebne.
 
-![Przykładowy dashboard](images/dashboard_example.png)
+![Przykładowy dashboard](images/dashboard.png)
 
 *   **Dashboard wyświetla:** 
     *   Ceny zakupu i sprzedaży energii elektrycznej dziś.
@@ -44,8 +44,10 @@ Dashboard, który pokazuje pełne możliwości integracji Pstryk All-in-One. Je�
         *   `Sprzedane Tanio` - Ilość wysłanej energii do sieci w cenie oznaczonej jako tania w konfiguracji (ale nie 0zł/kWh) w kWh.    
 
 *   **Co potrzebujesz:**
-    *   Utworzenie pomocnika `input_select.statystyki_czas` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Uzupełnij pola jak na screenie poniżej).
-    
+    *   Utworzenie pomocników:
+        * `input_boolean.depozyt` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Przełącznik -> Nazwa: "depozyt").
+        * `input_select.statystyki_czas` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Uzupełnij pola jak na screenie poniżej).
+
     ![Pomocnik Statystyki Czasu](images/helper.png)
 
 *   **Wykorzystane dodatki:** `custom:button-card`, `custom:apexcharts-card`, `custom:mini-graph-card`.
@@ -82,7 +84,9 @@ Dashboard, który pokazuje pełne możliwości integracji Pstryk All-in-One. Je�
     *   `Bieżącą cenę zakupu i sprzedaży` energii elektrycznej.
 
 *   **Co potrzebujesz:**
-    *   Utworzenie pomocnika `input_select.statystyki_czas` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Uzupełnij pola jak na screenie poniżej).
+    *   Utworzenie pomocników:
+        * `input_boolean.depozyt` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Przełącznik -> Nazwa: "depozyt").
+        * `input_select.statystyki_czas` (Ustawienia -> Urządzenia oraz usługi -> Pomocnicy -> Utwórz pomocnika -> wybór -> Uzupełnij pola jak na screenie poniżej).
 
     ![Pomocnik Statystyki Czasu](images/helper.png)
 

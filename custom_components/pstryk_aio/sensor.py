@@ -1,6 +1,6 @@
 """Definicje sensorów dla integracji Pstryk AIO (uwierzytelnianie Kluczem API, endpointy /integrations/)."""
 import logging
-from datetime import datetime 
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, cast
 
 from homeassistant.components.sensor import (
@@ -101,6 +101,7 @@ from .const import (
     FRIENDLY_NAME_CONSUMPTION_MONTHLY_COST_PLN,
     FRIENDLY_NAME_PRODUCTION_MONTHLY_YIELD_PLN,
 )
+from .const import ATTR_LAST_MONTH_VALUE # Dodano import dla nowego atrybutu
 from homeassistant.helpers.event import async_track_time_change
 _LOGGER = logging.getLogger(__name__)
 
@@ -485,6 +486,9 @@ class PstrykUniversalSensor(CoordinatorEntity, SensorEntity):
 
         now_local = dt_util.now()
         current_month_dt = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # Oblicz pierwszy dzień poprzedniego miesiąca dla agregacji
+        previous_month_target_dt = (current_month_dt - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
 
         current_cheap_thresh = None
         current_expensive_thresh = None
@@ -674,15 +678,22 @@ class PstrykUniversalSensor(CoordinatorEntity, SensorEntity):
             elif self._sensor_key == SENSOR_PRODUCTION_MONTHLY_KWH:
                 usage_frames = meter_usage_data.get("frames") if meter_usage_data else None
                 new_value, current_breakdown = self._aggregate_daily_data(
-                    usage_frames, USAGE_FRAME_RAE_KWH, now_local
+                    usage_frames, USAGE_FRAME_RAE_KWH, current_month_dt # Główna wartość dla bieżącego miesiąca
                 )
                 if current_breakdown:
                     attributes[ATTR_DAILY_BREAKDOWN_CURRENT_MONTH] = current_breakdown
+                
+                # Oblicz sumę dla poprzedniego miesiąca
+                last_month_total_kwh, _ = self._aggregate_daily_data(
+                    usage_frames, USAGE_FRAME_RAE_KWH, previous_month_target_dt
+                )
+                if last_month_total_kwh is not None:
+                    attributes[ATTR_LAST_MONTH_VALUE] = round(last_month_total_kwh, 3)
 
             elif self._sensor_key == SENSOR_CONSUMPTION_MONTHLY_COST_PLN:
                 cost_frames = meter_cost_data.get("frames") if meter_cost_data else None
                 new_value, current_breakdown = self._aggregate_daily_data(
-                    cost_frames, COST_FRAME_FAE_COST, now_local
+                    cost_frames, COST_FRAME_FAE_COST, current_month_dt # Główna wartość dla bieżącego miesiąca
                 )
                 if current_breakdown:
                     attributes[ATTR_DAILY_BREAKDOWN_CURRENT_MONTH] = current_breakdown
@@ -690,10 +701,17 @@ class PstrykUniversalSensor(CoordinatorEntity, SensorEntity):
             elif self._sensor_key == SENSOR_PRODUCTION_MONTHLY_YIELD_PLN:
                 cost_frames = meter_cost_data.get("frames") if meter_cost_data else None
                 new_value, current_breakdown = self._aggregate_daily_data(
-                    cost_frames, COST_FRAME_RAE_YIELD, now_local
+                    cost_frames, COST_FRAME_RAE_YIELD, current_month_dt # Główna wartość dla bieżącego miesiąca
                 )
                 if current_breakdown:
                     attributes[ATTR_DAILY_BREAKDOWN_CURRENT_MONTH] = current_breakdown
+
+                # Oblicz sumę dla poprzedniego miesiąca
+                last_month_total_pln, _ = self._aggregate_daily_data(
+                    cost_frames, COST_FRAME_RAE_YIELD, previous_month_target_dt
+                )
+                if last_month_total_pln is not None:
+                    attributes[ATTR_LAST_MONTH_VALUE] = round(last_month_total_pln, 2)
 
             _LOGGER.debug(f"({self.name}) Przed ustawieniem _attr_native_value, new_value: '{new_value}' (typ: {type(new_value)})")
             self._attr_native_value = new_value

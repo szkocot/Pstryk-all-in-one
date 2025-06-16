@@ -102,6 +102,7 @@ ATTR_DAILY_BREAKDOWN_PREVIOUS_MONTH = "daily_breakdown_previous_month"
 ATTR_HOURLY_BREAKDOWN_CURRENT_DAY = "hourly_breakdown_current_day"
 ATTR_DATA_STATUS_MESSAGE = "data_status"
 ATTR_AVERAGE_PRICE = "average_price" # Nowy atrybut dla średniej ceny
+ATTR_LAST_MONTH_VALUE = "last_month_value" # Podsumowanie zeszłego miesiąca
 
 USAGE_FAE_TOTAL = "fae_total_usage" 
 USAGE_RAE_TOTAL = "rae_total" 

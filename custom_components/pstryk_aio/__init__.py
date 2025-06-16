@@ -50,8 +50,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             is_after_13_local = now_in_ha_tz.hour >= 13
             now_utc = dt_util.utcnow() # Użyjemy tego dla końca okna danych z miernika
 
+            # Oblicz początek bieżącego i poprzedniego miesiąca
             start_of_current_month_local = now_in_ha_tz.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            meter_data_history_start_utc = dt_util.as_utc(start_of_current_month_local)
+            start_of_previous_month_local = (start_of_current_month_local - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            meter_data_history_start_utc = dt_util.as_utc(start_of_previous_month_local) # Pobieraj dane od początku poprzedniego miesiąca
             meter_data_history_end_utc = now_utc # Do teraz
             today_start_in_ha_tz = now_in_ha_tz.replace(hour=0, minute=0, second=0, microsecond=0)
             today_start_utc = dt_util.as_utc(today_start_in_ha_tz)
