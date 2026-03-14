@@ -92,7 +92,7 @@ class PstrykConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         usage_data = await api_client.get_integrations_meter_data_usage(
                             resolution="day", window_start=start_time, window_end=now
                         )
-                        _LOGGER.debug(f"Odpowiedź z get_integrations_meter_data_usage podczas config_flow: {str(usage_data)[:1000]}")
+                        _LOGGER.debug(f"Odpowiedź z unified-metrics (meter_values) podczas config_flow: {str(usage_data)[:1000]}")
 
                         if usage_data and isinstance(usage_data, dict):
                             name_from_api = usage_data.get("name") 
@@ -100,9 +100,9 @@ class PstrykConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 entry_title = f"{DEFAULT_NAME} {name_from_api.strip()}"
                                 _LOGGER.info(f"Pomyślnie pobrano nazwę licznika dla tytułu wpisu: {name_from_api}")
                             else:
-                                _LOGGER.debug("Klucz 'name' nie znaleziony lub pusty w odpowiedzi z energy-usage. Używam domyślnego tytułu.")
+                                _LOGGER.debug("Klucz 'name' nie znaleziony lub pusty w odpowiedzi z unified-metrics. Używam domyślnego tytułu.")
                         else:
-                            _LOGGER.debug("Brak danych lub nieprawidłowy format odpowiedzi z energy-usage. Używam domyślnego tytułu.")
+                            _LOGGER.debug("Brak danych lub nieprawidłowy format odpowiedzi z unified-metrics. Używam domyślnego tytułu.")
                     except Exception as e:
                         _LOGGER.warning(
                             f"Nie udało się pobrać/przetworzyć nazwy licznika dla tytułu wpisu, używam domyślnego. Błąd: {e}"

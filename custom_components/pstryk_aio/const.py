@@ -33,6 +33,7 @@ KEY_LAST_UPDATE = "last_api_update"
 API_BASE_URL = "https://api.pstryk.pl" 
 API_TIMEOUT = 20
 # Ścieżki API dla endpointów /integrations/
+API_UNIFIED_METRICS_PATH = "/integrations/meter-data/unified-metrics/"
 API_METER_DATA_USAGE_PATH = "/integrations/meter-data/energy-usage/"
 API_METER_DATA_COST_PATH = "/integrations/meter-data/energy-cost/"
 API_PRICING_PATH = "/integrations/pricing/" 
