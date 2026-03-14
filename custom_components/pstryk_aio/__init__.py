@@ -41,7 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data():
         """Pobiera najnowsze dane z API Pstryk przy użyciu Klucza API."""
-        _LOGGER.debug("Rozpoczynanie aktualizacji danych dla Pstryk AIO (Klucz API, /integrations/)")
+        _LOGGER.debug("Rozpoczynanie aktualizacji danych dla Pstryk AIO (Klucz API, unified-metrics + pricing)")
         
         try:
             now_in_ha_tz = dt_util.now()
@@ -68,7 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 window_end=meter_data_history_end_utc
             )
             if meter_data_usage_response is None:
-                _LOGGER.warning("Nie udało się pobrać danych z /integrations/meter-data/energy-usage/.")
+                _LOGGER.warning("Nie udało się pobrać danych zużycia z unified-metrics (metrics=meter_values).")
             
             # Pobierz dane o kosztach (fae_cost, rae_cost)
             meter_data_cost_response = await api_client.get_integrations_meter_data_cost(
@@ -77,7 +77,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 window_end=meter_data_history_end_utc
             )
             if meter_data_cost_response is None:
-                _LOGGER.warning("Nie udało się pobrać danych z /integrations/meter-data/energy-cost/.")
+                _LOGGER.warning("Nie udało się pobrać danych kosztowych z unified-metrics (metrics=cost).")
 
             refresh_today_purchase_prices = (
                 coordinator._date_prices_today_fetched != current_local_date or
@@ -264,7 +264,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 KEY_LAST_UPDATE: dt_util.utcnow().isoformat(),
             }
             _LOGGER.info(
-                f"Pomyślnie pobrano dane dla Pstryk AIO (Klucz API, /integrations/). "
+                f"Pomyślnie pobrano dane dla Pstryk AIO (Klucz API, unified-metrics/pricing). "
                 f"Usage: {'OK' if meter_data_usage_response else 'FAIL'}, "
                 f"Cost: {'OK' if meter_data_cost_response else 'FAIL'}, "
                 f"PurchasePricesToday: {'OK' if pricing_purchase_today_response and pricing_purchase_today_response.get('frames') else 'FAIL_EMPTY'}, "
