@@ -11,7 +11,6 @@ from homeassistant.util import dt as dt_util
 from .const import (
     API_BASE_URL,
     API_UNIFIED_METRICS_PATH,
-    API_PROSUMER_PRICING_PATH,
     API_REQUEST_HEADERS,
     API_TIMEOUT,
 )
@@ -22,12 +21,13 @@ _LOGGER = logging.getLogger(__name__)
 UNIFIED_METRIC_METER_VALUES = "meter_values"
 UNIFIED_METRIC_COST = "cost"
 UNIFIED_METRIC_PRICING = "pricing"
+UNIFIED_METRIC_BUNDLE = ",".join(
+    (UNIFIED_METRIC_METER_VALUES, UNIFIED_METRIC_COST, UNIFIED_METRIC_PRICING)
+)
 
 UNIFIED_METER_VALUES_RESPONSE_KEYS = ("meterValues", "meter_values")
 UNIFIED_COST_RESPONSE_KEYS = ("cost",)
 UNIFIED_PRICING_RESPONSE_KEYS = ("pricing",)
-
-
 def _pick_value(payload: Optional[Dict[str, Any]], *keys: str) -> Any:
     """Zwróć pierwszą dostępną wartość z payload."""
     if not isinstance(payload, dict):
@@ -66,6 +66,11 @@ def _sum_numeric_frames(frames: list[Dict[str, Any]], key: str) -> Optional[floa
             total += float(value)
             found = True
     return round(total, 6) if found else None
+
+
+def _has_frames(response_data: Optional[Dict[str, Any]]) -> bool:
+    """Sprawdź, czy odpowiedź zawiera listę ramek."""
+    return isinstance(response_data, dict) and isinstance(response_data.get("frames"), list) and bool(response_data["frames"])
 
 
 class PstrykApiError(Exception):
@@ -333,7 +338,13 @@ class PstrykApiClientApiKey:
 
         return normalized_response
 
-    def _normalize_unified_pricing_response(self, response_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _normalize_unified_pricing_response(
+        self,
+        response_data: Optional[Dict[str, Any]],
+        response_keys: tuple[str, ...] = UNIFIED_PRICING_RESPONSE_KEYS,
+        price_net_keys: tuple[str, ...] = ("price_net", "price_net_avg"),
+        price_gross_keys: tuple[str, ...] = ("price_gross", "price_gross_avg"),
+    ) -> Optional[Dict[str, Any]]:
         """Mapuje unified-metrics na płaski format cenowy."""
         if not isinstance(response_data, dict):
             return response_data
@@ -343,12 +354,12 @@ class PstrykApiClientApiKey:
             if not isinstance(frame, dict):
                 continue
 
-            pricing_values = _pick_metric_container(frame, UNIFIED_PRICING_RESPONSE_KEYS)
+            pricing_values = _pick_metric_container(frame, response_keys)
             normalized_frame: Dict[str, Any] = {
                 "start": frame.get("start"),
                 "end": frame.get("end"),
-                "price_net": _pick_value(pricing_values, "price_net", "price_net_avg"),
-                "price_gross": _pick_value(pricing_values, "price_gross", "price_gross_avg"),
+                "price_net": _pick_value(pricing_values, *price_net_keys),
+                "price_gross": _pick_value(pricing_values, *price_gross_keys),
                 "is_cheap": _pick_value(pricing_values, "is_cheap"),
                 "is_expensive": _pick_value(pricing_values, "is_expensive"),
             }
@@ -359,11 +370,12 @@ class PstrykApiClientApiKey:
                 normalized_frame["is_live"] = is_live
             normalized_frames.append(normalized_frame)
 
-        summary = _pick_metric_container(response_data.get("summary"), UNIFIED_PRICING_RESPONSE_KEYS)
+        summary = _pick_metric_container(response_data.get("summary"), response_keys)
         normalized_response: Dict[str, Any] = {
+            "resolution": response_data.get("resolution"),
             "frames": normalized_frames,
-            "price_net_avg": _pick_value(summary, "price_net_avg"),
-            "price_gross_avg": _pick_value(summary, "price_gross_avg"),
+            "price_net_avg": _pick_value(summary, *price_net_keys),
+            "price_gross_avg": _pick_value(summary, *price_gross_keys),
         }
 
         if normalized_response["price_net_avg"] is None:
@@ -381,6 +393,31 @@ class PstrykApiClientApiKey:
                 )
 
         return normalized_response
+
+    async def get_unified_metrics_bundle(
+        self, resolution: str, window_start: datetime, window_end: datetime
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        """Pobiera komplet metryk z unified-metrics dla jednego okna czasowego."""
+        response_data = await self._request_unified_metrics(
+            metrics=UNIFIED_METRIC_BUNDLE,
+            resolution=resolution,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        purchase_pricing = self._normalize_unified_pricing_response(response_data)
+        prosumer_pricing = self._normalize_unified_pricing_response(
+            response_data,
+            response_keys=UNIFIED_PRICING_RESPONSE_KEYS,
+            price_net_keys=("price_prosumer_net", "price_prosumer_net_avg", "price_net", "price_net_avg"),
+            price_gross_keys=("price_prosumer_gross", "price_prosumer_gross_avg", "price_gross", "price_gross_avg"),
+        )
+
+        return {
+            "usage": self._normalize_unified_usage_response(response_data),
+            "cost": self._normalize_unified_cost_response(response_data),
+            "purchase_pricing": purchase_pricing,
+            "prosumer_pricing": prosumer_pricing,
+        }
 
     async def test_authentication(self) -> bool:
         """Testuje autentykację Kluczem API poprzez próbę pobrania danych unified-metrics."""
@@ -442,12 +479,16 @@ class PstrykApiClientApiKey:
         return self._normalize_unified_pricing_response(response_data)
 
     async def get_integrations_prosumer_pricing_data(self, resolution: str, window_start: datetime, window_end: datetime) -> Optional[Dict[str, Any]]:
-        """Pobiera dane cenowe sprzedaży (prosument) z /integrations/prosumer-pricing/."""
-        start_str = window_start.strftime('%Y-%m-%dT%H:%M:%SZ')
-        end_str = window_end.strftime('%Y-%m-%dT%H:%M:%SZ')   
-        params = {"resolution": resolution, "window_start": start_str, "window_end": end_str}
-        try:
-            return await self._request("GET", API_PROSUMER_PRICING_PATH, params=params) 
-        except PstrykApiError as e:
-            _LOGGER.warning(f"Nie udało się pobrać danych z {API_PROSUMER_PRICING_PATH} (ceny sprzedaży): {e}")
-            return None
+        """Pobiera dane cenowe sprzedaży z unified-metrics."""
+        response_data = await self._request_unified_metrics(
+            metrics=UNIFIED_METRIC_BUNDLE,
+            resolution=resolution,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        return self._normalize_unified_pricing_response(
+            response_data,
+            response_keys=UNIFIED_PRICING_RESPONSE_KEYS,
+            price_net_keys=("price_prosumer_net", "price_prosumer_net_avg", "price_net", "price_net_avg"),
+            price_gross_keys=("price_prosumer_gross", "price_prosumer_gross_avg", "price_gross", "price_gross_avg"),
+        )

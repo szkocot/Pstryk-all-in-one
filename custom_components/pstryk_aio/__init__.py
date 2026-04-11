@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import PstrykApiClientApiKey, PstrykApiError, PstrykAuthError 
+from .pricing_cache import select_today_pricing_response
 from .const import (
     DOMAIN,
     PLATFORMS,
@@ -41,7 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data():
         """Pobiera najnowsze dane z API Pstryk przy użyciu Klucza API."""
-        _LOGGER.debug("Rozpoczynanie aktualizacji danych dla Pstryk AIO (Klucz API, unified-metrics + pricing)")
+        _LOGGER.debug("Starting Pstryk AIO refresh (API key, unified-metrics bundle)")
         
         try:
             now_in_ha_tz = dt_util.now()
@@ -60,24 +61,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             today_end_utc = dt_util.as_utc(today_start_in_ha_tz + timedelta(days=1))
             tomorrow_start_utc = today_end_utc
             tomorrow_end_utc = dt_util.as_utc(today_start_in_ha_tz + timedelta(days=2))
+            promotable_purchase_today = (
+                coordinator._cached_purchase_prices_tomorrow
+                if coordinator._date_prices_tomorrow_valid_for == current_local_date
+                else None
+            )
+            promotable_prosumer_today = (
+                coordinator._cached_prosumer_prices_tomorrow
+                if coordinator._date_prices_tomorrow_valid_for == current_local_date
+                else None
+            )
 
-            # Pobierz dane o zużyciu/produkcji (kWh, miesięczne, saldo)
-            meter_data_usage_response = await api_client.get_integrations_meter_data_usage(
+            # Fetch historical usage/cost data from one unified-metrics bundle.
+            history_bundle = await api_client.get_unified_metrics_bundle(
                 resolution="hour",
                 window_start=meter_data_history_start_utc,
                 window_end=meter_data_history_end_utc
             )
+            meter_data_usage_response = history_bundle.get("usage") if history_bundle else None
             if meter_data_usage_response is None:
-                _LOGGER.warning("Nie udało się pobrać danych zużycia z unified-metrics (metrics=meter_values).")
+                _LOGGER.warning("Failed to fetch usage data from unified-metrics (metrics=meterValues,cost,pricing).")
             
-            # Pobierz dane o kosztach (fae_cost, rae_cost)
-            meter_data_cost_response = await api_client.get_integrations_meter_data_cost(
-                resolution="hour",
-                window_start=meter_data_history_start_utc,
-                window_end=meter_data_history_end_utc
-            )
+            meter_data_cost_response = history_bundle.get("cost") if history_bundle else None
             if meter_data_cost_response is None:
-                _LOGGER.warning("Nie udało się pobrać danych kosztowych z unified-metrics (metrics=cost).")
+                _LOGGER.warning("Failed to fetch cost data from unified-metrics (metrics=meterValues,cost,pricing).")
 
             refresh_today_purchase_prices = (
                 coordinator._date_prices_today_fetched != current_local_date or
@@ -88,22 +95,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 coordinator._cached_prosumer_prices_today is None
             )
             successfully_updated_any_today_prices = False
+            today_bundle = None
+            if refresh_today_purchase_prices or refresh_today_prosumer_prices:
+                today_bundle = await api_client.get_unified_metrics_bundle(
+                    resolution="hour",
+                    window_start=today_start_utc,
+                    window_end=today_end_utc,
+                )
 
             # --- Ceny ZAKUPU na dziś ---
             pricing_purchase_today_response: Optional[dict] = None
             if refresh_today_purchase_prices:
                 _LOGGER.debug(f"Pobieranie nowych cen zakupu na dziś ({current_local_date}). Poprzedni cache date: {coordinator._date_prices_today_fetched}")
-                api_response_purchase = await api_client.get_integrations_pricing_data(
-                    resolution="hour", window_start=today_start_utc, window_end=today_end_utc
+                api_response_purchase = today_bundle.get("purchase_pricing") if today_bundle else None
+                pricing_purchase_today_response, refreshed_today_purchase = select_today_pricing_response(
+                    api_response=api_response_purchase,
+                    cached_today=coordinator._cached_purchase_prices_today,
+                    promotable_tomorrow=promotable_purchase_today,
+                    expected_date=current_local_date,
                 )
-                if api_response_purchase and api_response_purchase.get("frames"):
-                    pricing_purchase_today_response = api_response_purchase
-                    coordinator._cached_purchase_prices_today = api_response_purchase
+                if refreshed_today_purchase and pricing_purchase_today_response.get("frames"):
+                    coordinator._cached_purchase_prices_today = pricing_purchase_today_response
                     successfully_updated_any_today_prices = True # Zaznaczamy sukces
-                    _LOGGER.info(f"Pomyślnie pobrano i zbuforowano ceny zakupu na dziś ({current_local_date}).")
+                    _LOGGER.info(
+                        "Ustawiono ceny zakupu na dziś (%s) z nowych danych lub z bufora 'jutro'.",
+                        current_local_date,
+                    )
                 else:
                     _LOGGER.warning(f"Nie udało się pobrać danych cen zakupu na dziś ({current_local_date}) lub ramki są puste. Używam starych z cache, jeśli dostępne.")
-                    pricing_purchase_today_response = coordinator._cached_purchase_prices_today # Użyj starych, jeśli są
             else:
                 _LOGGER.debug(f"Używanie zbuforowanych cen zakupu na dziś ({current_local_date}), data cache ({coordinator._date_prices_today_fetched}) zgodna.")
                 pricing_purchase_today_response = coordinator._cached_purchase_prices_today
@@ -163,6 +182,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
             pricing_purchase_tomorrow_response: Optional[dict] = None
+            tomorrow_bundle = None
+            needs_purchase_tomorrow_fetch = not (
+                coordinator._cached_purchase_prices_tomorrow and
+                coordinator._cached_purchase_prices_tomorrow.get("frames")
+            )
+            needs_prosumer_tomorrow_fetch = not (
+                coordinator._cached_prosumer_prices_tomorrow and
+                coordinator._cached_prosumer_prices_tomorrow.get("frames")
+            )
+            if needs_purchase_tomorrow_fetch or needs_prosumer_tomorrow_fetch:
+                tomorrow_bundle = await api_client.get_unified_metrics_bundle(
+                    resolution="hour",
+                    window_start=tomorrow_start_utc,
+                    window_end=tomorrow_end_utc,
+                )
+
             # Po potencjalnym resecie powyżej, _date_prices_tomorrow_valid_for jest już ustawione na tomorrow_local_date
             if (coordinator._cached_purchase_prices_tomorrow and
                     coordinator._cached_purchase_prices_tomorrow.get("frames")):
@@ -173,9 +208,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     f"Próba pobrania nowych cen ZAKUPU na jutro ({tomorrow_local_date}). "
                     "Cache był pusty lub nie zawierał ramek (mógł zostać zresetowany lub poprzednia próba nie powiodła się)."
                 )
-                api_response = await api_client.get_integrations_pricing_data(
-                    resolution="hour", window_start=tomorrow_start_utc, window_end=tomorrow_end_utc
-                )
+                api_response = tomorrow_bundle.get("purchase_pricing") if tomorrow_bundle else None
                 if _has_meaningful_price_data(api_response) and \
                    _are_frames_for_expected_date(api_response, tomorrow_local_date):
                     pricing_purchase_tomorrow_response = api_response
@@ -198,17 +231,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pricing_prosumer_today_response: Optional[dict] = None
             if refresh_today_prosumer_prices:
                 _LOGGER.debug(f"Pobieranie nowych cen sprzedaży na dziś ({current_local_date}). Poprzedni cache date: {coordinator._date_prices_today_fetched}")
-                api_response_prosumer = await api_client.get_integrations_prosumer_pricing_data(
-                    resolution="hour", window_start=today_start_utc, window_end=today_end_utc
+                api_response_prosumer = today_bundle.get("prosumer_pricing") if today_bundle else None
+                pricing_prosumer_today_response, refreshed_today_prosumer = select_today_pricing_response(
+                    api_response=api_response_prosumer,
+                    cached_today=coordinator._cached_prosumer_prices_today,
+                    promotable_tomorrow=promotable_prosumer_today,
+                    expected_date=current_local_date,
                 )
-                if api_response_prosumer and api_response_prosumer.get("frames"):
-                    pricing_prosumer_today_response = api_response_prosumer
-                    coordinator._cached_prosumer_prices_today = api_response_prosumer
+                if refreshed_today_prosumer and pricing_prosumer_today_response.get("frames"):
+                    coordinator._cached_prosumer_prices_today = pricing_prosumer_today_response
                     successfully_updated_any_today_prices = True # Zaznaczamy sukces
-                    _LOGGER.info(f"Pomyślnie pobrano i zbuforowano ceny sprzedaży na dziś ({current_local_date}).")
+                    _LOGGER.info(
+                        "Ustawiono ceny sprzedaży na dziś (%s) z nowych danych lub z bufora 'jutro'.",
+                        current_local_date,
+                    )
                 else:
                     _LOGGER.warning(f"Nie udało się pobrać danych cen sprzedaży na dziś ({current_local_date}) lub ramki są puste. Używam starych z cache, jeśli dostępne.")
-                    pricing_prosumer_today_response = coordinator._cached_prosumer_prices_today # Użyj starych, jeśli są
             else:
                 _LOGGER.debug(f"Używanie zbuforowanych cen sprzedaży na dziś ({current_local_date}), data cache ({coordinator._date_prices_today_fetched}) zgodna.")
                 pricing_prosumer_today_response = coordinator._cached_prosumer_prices_today
@@ -233,9 +271,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     f"Próba pobrania nowych cen SPRZEDAŻY na jutro ({tomorrow_local_date}). "
                     "Cache był pusty lub nie zawierał ramek (mógł zostać zresetowany lub poprzednia próba nie powiodła się)."
                 )
-                api_response_prosumer = await api_client.get_integrations_prosumer_pricing_data(
-                    resolution="hour", window_start=tomorrow_start_utc, window_end=tomorrow_end_utc
-                )
+                api_response_prosumer = tomorrow_bundle.get("prosumer_pricing") if tomorrow_bundle else None
                 if _has_meaningful_price_data(api_response_prosumer) and \
                    _are_frames_for_expected_date(api_response_prosumer, tomorrow_local_date):
                     pricing_prosumer_tomorrow_response = api_response_prosumer
@@ -264,7 +300,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 KEY_LAST_UPDATE: dt_util.utcnow().isoformat(),
             }
             _LOGGER.info(
-                f"Pomyślnie pobrano dane dla Pstryk AIO (Klucz API, unified-metrics/pricing). "
+                f"Pomyślnie pobrano dane dla Pstryk AIO (Klucz API, unified-metrics bundle). "
                 f"Usage: {'OK' if meter_data_usage_response else 'FAIL'}, "
                 f"Cost: {'OK' if meter_data_cost_response else 'FAIL'}, "
                 f"PurchasePricesToday: {'OK' if pricing_purchase_today_response and pricing_purchase_today_response.get('frames') else 'FAIL_EMPTY'}, "
