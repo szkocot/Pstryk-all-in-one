@@ -1,0 +1,15 @@
+services:
+  homeassistant:
+    container_name: homeassistant-pstryk_aio-testing
+    image: homeassistant/home-assistant:2026.8.2
+    volumes:
+      - ha-config:/config
+      - ./testing/configuration.yaml:/config/configuration.yaml
+      - ./custom_components/pstryk_aio:/config/custom_components/pstryk_aio
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+
+volumes:
+  ha-config:
