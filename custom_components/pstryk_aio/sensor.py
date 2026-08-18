@@ -177,7 +177,7 @@ class PstrykUniversalSensor(CoordinatorEntity, SensorEntity):
         """Inicjalizacja sensora."""
         super().__init__(coordinator)
         self._sensor_key = sensor_key
-        self._attr_unique_id = f"{self._sensor_key}" 
+        self._attr_unique_id = f"{entry_id}_{self._sensor_key}" 
         self._attr_name = f"{DEFAULT_NAME} {name_suffix}"
         self._attr_device_class = device_class
         self._attr_state_class = state_class
